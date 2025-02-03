@@ -22,11 +22,10 @@ inline void matmul_kernel(
     size_t rows_b,
     size_t cols_b // One of these arguments is useless but we keep it for clarity
 ) {
-    #pragma omp parallel(1)
     for (size_t r = 0; r < rows_a; ++r) {
         for (size_t c = 0; c < cols_b; ++c) {
             for (size_t k = 0; k < cols_a; ++k) {
-                res[(r * rows_a) + c] += a[(r * cols_a) + k] * b[(k * cols_b) + c];
+                res[(r * cols_b) + c] += a[(r * cols_a) + k] * b[(k * cols_b) + c];
             }
         }
     }
@@ -108,13 +107,6 @@ public:
         size_t new_offset = offset_;
         // Compute new offset
         new_offset = std::inner_product(idx.begin(), idx.end(), strides_.begin(), offset_);
-        // TODO: MAY BE WRONG, DON'T REMOVE!
-        // for (size_t i = 0; i < NewRank; ++i) {
-        //     if (idx[i] >= shape_[i]) {
-        //         throw std::out_of_range("Index out of bounds");
-        //     }
-        //     new_offset += idx[i] * strides_[i];
-        // }
         // Compute new strides and shape
         std::array<size_t, NewRank> new_shape;
         std::array<size_t, NewRank> new_strides;
@@ -142,7 +134,6 @@ public:
     }
 
     // Matrix multiplication
-    // Tensor<Rank - 1> matmul(const Tensor<Rank>& other) {
     Tensor<Rank> matmul(const Tensor<Rank>& other) {
         // Check shape consistency
         if(shape_[Rank - 1] != other.shape()[Rank - 2]) {
@@ -154,32 +145,53 @@ public:
         }
         // m (p x q) @ n (q x k) = r (p x k)
 
-        // We could multiply the matrices together and then return the result transposed
         std::array<size_t, Rank> new_shape = shape_;
         new_shape[Rank - 1] = other.shape()[Rank - 1];
         auto result = Tensor<Rank>(new_shape);
-        // Since we need to access only the last 2 dimensions, we
-        // need to pre-compute the base index to run the matmul kernel
-        auto base_idx_this = offset_;
-        auto base_idx_other = other.offset_;
-        // for (size_t i = 0; i < Rank - 2; ++i) {
-        //     base_idx_this += shape_[i] * strides_[i];
-        //     base_idx_other += other.shape_[i] * other.strides_[i];
-        // }
-        // With this approach, we are just multiplying one matrix
-        // Loop through last dimensions (rows, columns)
-        matmul_kernel(
-            result.data_.get(),
-            (data_.get() + base_idx_this),
-            (other.data_.get() + base_idx_other),
-            shape_[Rank - 2],
-            shape_[Rank - 1],
-            other.shape_[Rank - 2],
-            other.shape_[Rank - 1]
-        );
+
+        // For ranks higher than 2, we need to loop through the batch dimensions
+        for (size_t r = 3; r <= Rank; r++) {
+            if (shape_[Rank - r] != other.shape()[Rank - r]) {
+                std::stringstream ss;
+                ss << "Batch dimensions don't match at dim " << Rank - r
+                    << ". Got " << shape_[Rank - r]
+                    << " vs " << other.shape()[Rank - r];
+                throw std::invalid_argument(ss.str());
+            }
+        }
+        // Compute the total batch size by multiplying all dimensions except the last 2
+        size_t batch_size = 1;
+        for (size_t i = 0; i < Rank - 2; ++i) {
+            batch_size *= shape_[i];
+        }
+        // For each batch...
+        for (size_t batch = 0; batch < batch_size; ++batch) {
+            // We need to compute the offsets for this batch
+            size_t this_offset = offset_;
+            size_t other_offset = other.offset_;
+            size_t result_offset = result.offset_;
+            // We basically compute the starting position of
+            // each matrix by generating an index with Rank - 2.
+            // We use the % operation to retrieve the index value of the current dimension
+            for (size_t dim = 0; dim < Rank - 2; ++dim) {
+                size_t idx = batch % shape_[dim];
+                this_offset += idx * strides_[dim];
+                other_offset += idx * other.strides_[dim];
+                result_offset += idx * result.strides_[dim];
+            }
+            // Multiply the matrices, storing the result into the result Tensor's data buffer
+            matmul_kernel(
+                (result.data_.get() + result_offset),
+                (data_.get() + this_offset),
+                (other.data_.get() + other_offset),
+                shape_[Rank - 2],
+                shape_[Rank - 1],
+                other.shape_[Rank - 2],
+                other.shape_[Rank - 1]
+            );
+        }
         return result;
     }
-
 
     // Tensor properties
     const std::array<size_t, Rank>& shape() const { return shape_; }
@@ -196,9 +208,6 @@ public:
             // Base case, print the current element
             if (dim == Rank) {
                 size_t linear_idx = std::inner_product(current_idx.begin(), current_idx.end(), strides_.begin(), offset_);
-                // for (size_t i = 0; i < Rank; ++i) {
-                //     linear_idx += current_idx[i] * strides_[i];
-                // }
                 std::cout << std::fixed << std::setprecision(4) << data[linear_idx] << " ";
                 return;
             }
@@ -241,18 +250,25 @@ auto create(Args&&... args) {
 }
 
 int main(int argc, char** argv) {
-    auto a = create(300, 4000);
-    auto b = create(4000, 300);
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 4; j++) {
-            a(i, j) = i + j;
-            b(j, i) = i + j;
+    auto a = create(2, 5, 3, 4);
+    auto b = create(2, 5 ,4, 3);
+    for (int l = 0; l < 2; l++) {
+        for (int k = 0; k < 5; k++) {
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 4; j++) {
+                    a(l, k, i, j) = (k + 1) * (i + j);
+                    b(l, k, j, i) = (k + 1) * (i + j);
+                }
+            }
         }
     }
     std::cout << "A: " << a << ", B: " << b << "\n";
-    // a.print();
-    // b.print();
+    a.print();
+    b.print();
     auto r = a.matmul(b);
-    // std::cout << "R: " << r << "\n";
-    // r.print();
+    std::cout << "R: " << r << "\n";
+    std::cout << "==========================================\n";
+    r(0).print();
+    std::cout << "==========================================\n";
+    r(1).print();
 }
