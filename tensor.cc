@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <iomanip>
 #include <numeric>
 #include <memory>
@@ -101,7 +102,6 @@ public:
     template <typename... Args>
     requires (sizeof...(Args) < Rank)
     auto operator()(Args... indices) {
-        // Rank: 3 -> Idx (0, 0) -> Rank: 1
         const size_t NewRank = Rank - sizeof...(Args);
         const std::array<size_t, sizeof...(Args)> idx = {static_cast<size_t>(indices)...};
         size_t new_offset = offset_;
@@ -143,12 +143,10 @@ public:
                 << other.shape()[Rank - 2] << " x N)";
             throw std::invalid_argument(ss.str());
         }
-        // m (p x q) @ n (q x k) = r (p x k)
 
         std::array<size_t, Rank> new_shape = shape_;
         new_shape[Rank - 1] = other.shape()[Rank - 1];
         auto result = Tensor<Rank>(new_shape);
-
         // For ranks higher than 2, we need to loop through the batch dimensions
         for (size_t r = 3; r <= Rank; r++) {
             if (shape_[Rank - r] != other.shape()[Rank - r]) {
@@ -170,9 +168,9 @@ public:
             size_t this_offset = offset_;
             size_t other_offset = other.offset_;
             size_t result_offset = result.offset_;
-            // We basically compute the starting position of
-            // each matrix by generating an index with Rank - 2.
-            // We use the % operation to retrieve the index value of the current dimension
+            // We basically compute the starting position of each matrix by
+            // generating an index with Rank - 2. We use the % operation to
+            // retrieve the index value of the current dimension
             for (size_t dim = 0; dim < Rank - 2; ++dim) {
                 size_t idx = batch % shape_[dim];
                 this_offset += idx * strides_[dim];
@@ -192,6 +190,66 @@ public:
         }
         return result;
     }
+
+    // Check the broadcasting conditions on the shape
+    static bool is_broadcastable(const Tensor<Rank>& a, const Tensor<Rank>& b) {
+        bool req_empty = false;
+        // Check that dimensions are the same until we see the first dim = 1
+        for (size_t i = Rank; i > 0; i--) {
+            auto& cur_a = a.shape_[i - 1];
+            auto& cur_b = b.shape_[i - 1];
+            // Check empty
+            if (req_empty) {
+                if (cur_b != 1) return false;
+            }
+            // Check dims equals
+            else {
+                if (cur_a != cur_b) {
+                    if (cur_b == 1) req_empty = true; else return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // Linearwise operators. These operators support broadcasting in the sense
+    // that the other Tensor rank have only outer shape dimensions of size 1.
+    // eg. Tensor(5, 4) + Tensor(4) will broadcast in Tensor(5, 4) + Tensor(1,
+    // 4) where the Tensor is repeated along dim 0.
+
+    template <size_t NewShape>
+    Tensor<NewShape> broadcast(const Tensor<NewShape>& other) {
+
+    }
+
+    // Sum two tensors. Broadcasts dimensions along the axis that are 1.
+    Tensor<Rank> operator+(const Tensor<Rank>& other) {
+        // Check shape compatibility with broadcasting
+        if (!is_broadcastable(*this, other)) {
+            std::stringstream ss;
+            ss << "Tensors " << *this << " and " << other << " are not broadcastable";
+            throw std::invalid_argument(ss.str());
+        }
+
+        // Create result tensor with max of each dimension
+        auto result = Tensor<Rank>(shape_);
+        auto total_size = std::accumulate(shape_.begin(), shape_.end(), 1, std::multiplies<>());
+        auto other_size = std::accumulate(other.shape_.begin(), other.shape_.end(), 1, std::multiplies<>());
+
+        // Get raw buffer pointers
+        float *const this_data = data_.get();
+        float *const other_data = other.data_.get();
+        float *const result_data = result.data_.get();
+
+        for (size_t idx = 0; idx < total_size; ++idx) {
+            auto other_idx = idx % other_size;
+            // std::cout << "this_data[" << other_idx << "] - other_data[" << idx << "]\n";
+            result_data[idx] = this_data[idx] + other_data[other_idx];
+        }
+
+        return result;
+    }
+
 
     // Tensor properties
     const std::array<size_t, Rank>& shape() const { return shape_; }
@@ -232,7 +290,7 @@ public:
             }
 
             std::cout << "]";
-            if (dim == 0) std::cout << ")\n";
+            if (dim == 0) std::cout << "\n";
         };
 
         // Start recursive printing
@@ -250,25 +308,29 @@ auto create(Args&&... args) {
 }
 
 int main(int argc, char** argv) {
-    auto a = create(2, 5, 3, 4);
-    auto b = create(2, 5 ,4, 3);
+    auto a = create(2, 2, 3, 4);
+    auto b = create(1, 1, 1, 4);
+
+    for (int i = 0; i < 4; i++) {
+        b(0, 0, 0, i) = i + 1;
+    }
+    std::cout << std::setfill('=') << std::setw(50) << " B " << std::setfill('=') << std::setw(50) << "\n";
+    b.print();
+
     for (int l = 0; l < 2; l++) {
-        for (int k = 0; k < 5; k++) {
+        for (int k = 0; k < 2; k++) {
             for (int i = 0; i < 3; i++) {
                 for (int j = 0; j < 4; j++) {
                     a(l, k, i, j) = (k + 1) * (i + j);
-                    b(l, k, j, i) = (k + 1) * (i + j);
                 }
             }
         }
     }
-    std::cout << "A: " << a << ", B: " << b << "\n";
+
+    std::cout << std::setfill('=') << std::setw(50) << " A " << std::setfill('=') << std::setw(50) << "\n";
     a.print();
-    b.print();
-    auto r = a.matmul(b);
-    std::cout << "R: " << r << "\n";
-    std::cout << "==========================================\n";
-    r(0).print();
-    std::cout << "==========================================\n";
-    r(1).print();
+
+    std::cout << std::setfill('=') << std::setw(50) << " C " << std::setfill('=') << std::setw(50) << "\n";
+    auto c = a + b;
+    c.print();
 }
