@@ -1,4 +1,5 @@
 #include "tensor.hpp"
+#include <format>
 #include <fstream>
 #include <array>
 #include <iostream>
@@ -40,11 +41,24 @@ Tensor<3> load_data(const std::string& path) {
     // We need to convert bytes to actual floating point values
     Real* buffer = new Real[images_bytes];
     for (size_t i = 0; i < images_bytes; i++) {
-        buffer[i] = static_cast<Real>(images[i]);
+        buffer[i] = static_cast<u_int8_t>(images[i]);
     }
     delete[] images;
     // TODO: return Tensor.frombuffer(data)
     return Tensor<3>::from_buffer(buffer, {dataset_size, image_width, image_height});
+}
+
+// Utility function to print an image of the dataset
+void print_image(Tensor<2>& image) {
+    size_t height = image.shape()[0];
+    size_t width = image.shape()[1];
+    for (size_t h = 0; h < height; h++) {
+        for (size_t w = 0; w < width; w++) {
+            std::cout << (image(h, w) > 0 ? "@" : " ");
+            // std::cout << std::format("{:.2f}", image(h, w));
+        }
+        std::cout << "\n";
+    }
 }
 
 // Test program driver
@@ -52,21 +66,5 @@ int main(int argc, char** argv) {
     if (argc < 2) return -1;
     std::cout << "Reading " << argv[1] << std::endl;
     auto dataset = load_data(argv[1]);
-    std::cout << dataset << std::endl;
-
-    auto print_image = [](auto &image) {
-        size_t height = image.shape()[0];
-        size_t width = image.shape()[1];
-        for (size_t h = 0; h < height; h++) {
-            for (size_t w = 0; w < width; w++) {
-                std::cout << (image(w, h) > 0 ? "#" : " ");
-            }
-            std::cout << "\n";
-        }
-    };
-
-    for (size_t i = 0; i < 10; i++) {
-        auto image = dataset(i);
-        print_image(image);
-    }
+    std::cout << "Loaded dataset in " << dataset << std::endl;
 }
