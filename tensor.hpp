@@ -32,6 +32,35 @@ inline void matmul_kernel(
     }
 }
 
+// Apply elementwise the op to each element of a and b, saving the result to
+// res. Broadcasted version of indexing assumes that b has been broadcasted to
+// a.
+inline void broadcasted_ewise_kernel(
+    Real* res,
+    Real* a,
+    Real* b,
+    std::function<Real(Real&, Real&)> op,
+    size_t size_a,
+    size_t size_b
+) {
+    for (size_t idx = 0; idx < size_a; idx++) {
+        size_t b_idx = idx % size_b;
+        res[idx] = op(a[idx], b[b_idx]);
+    }
+}
+
+inline void scalar_ewise_kernel(
+    Real *res,
+    Real* a,
+    Real b,
+    std::function<Real(Real&, Real&)> op,
+    size_t size_a
+) {
+    for (size_t idx = 0; idx < size_a; idx++) {
+        res[idx] = op(a[idx], b);
+    }
+}
+
 // Tensor class definition. It's just a multi-dimensional view over a linear memory chunk.
 // Data is accessed in a row-major fashion.
 template <size_t Rank>
@@ -60,13 +89,21 @@ private:
     }
 
 public:
-    // Private constructor for creating new tensors from shapes
+    // Constructor that creates new tensors from shapes
     Tensor(const std::array<size_t, Rank>& shape) : offset_(0), shape_(shape), strides_{} {
         validate_shape();
         compute_strides();
         size_t read_size = std::accumulate(shape_.begin(), shape_.end(), 1, std::multiplies<>());
         // Create the chunk and assign it to the shared_ptr member
         data_.reset(new Real[read_size]);
+    }
+
+    Tensor(Real* data, const std::array<size_t, Rank>& shape) : offset_(0), shape_(shape), strides_{} {
+        validate_shape();
+        compute_strides();
+        size_t read_size = std::accumulate(shape_.begin(), shape_.end(), 1, std::multiplies<>());
+        // Create the chunk and assign it to the shared_ptr member
+        data_.reset(data);
     }
 
     // Private constructor for creating views
@@ -131,6 +168,15 @@ public:
         }
         os << "])";
         return os;
+    }
+
+    // Array creation routine from raw buffer
+    // ! This can potentially cause memory problems because the caller may
+    // retain the raw pointer. From now on we assume that the resulting tensor
+    // is the only borrower of this memory chunk, so it's totally fine to free
+    // the memory after the last view on this raw buffer is freed.
+    static Tensor<Rank> from_buffer(Real* buffer, const std::array<size_t, Rank> shape) {
+        return Tensor(buffer, shape);
     }
 
     // Matrix multiplication
@@ -212,44 +258,71 @@ public:
         return true;
     }
 
-    // Linearwise operators. These operators support broadcasting in the sense
-    // that the other Tensor rank have only outer shape dimensions of size 1.
-    // eg. Tensor(5, 4) + Tensor(4) will broadcast in Tensor(5, 4) + Tensor(1,
-    // 4) where the Tensor is repeated along dim 0.
 
-    template <size_t NewShape>
-    Tensor<NewShape> broadcast(const Tensor<NewShape>& other) {
-
-    }
-
-    // Sum two tensors. Broadcasts dimensions along the axis that are 1.
-    Tensor<Rank> operator+(const Tensor<Rank>& other) {
-        // Check shape compatibility with broadcasting
+    // Linearwise operator that support broadcasting between tensors of
+    // different shapes. Reading from right to left: dimensions must either
+    // match exactly or one must be 1. Once a dimension of 1 is encountered in
+    // the second tensor (other), all remaining dimensions to the left must also
+    // be 1. Example: [2,2,3,4] can broadcast with [1,1,1,4] but not with
+    // [1,2,1,4]. It is slightly different (and less flexible) than NumPy and.
+    // Pytorch broadcasting rules but it allows computing broadcasting indices
+    // more easily.
+    Tensor<Rank> ewise_op(const Tensor<Rank>& other, std::function<Real(Real, Real)> op) {
+        // Check shape compatibility with broadcasting rules
         if (!is_broadcastable(*this, other)) {
             std::stringstream ss;
             ss << "Tensors " << *this << " and " << other << " are not broadcastable";
             throw std::invalid_argument(ss.str());
         }
 
-        // Create result tensor with max of each dimension
+        // Create result tensor
         auto result = Tensor<Rank>(shape_);
-        auto total_size = std::accumulate(shape_.begin(), shape_.end(), 1, std::multiplies<>());
+        auto result_size = std::accumulate(shape_.begin(), shape_.end(), 1, std::multiplies<>());
         auto other_size = std::accumulate(other.shape_.begin(), other.shape_.end(), 1, std::multiplies<>());
 
-        // Get raw buffer pointers
-        float *const this_data = data_.get();
-        float *const other_data = other.data_.get();
-        float *const result_data = result.data_.get();
-
-        for (size_t idx = 0; idx < total_size; ++idx) {
-            auto other_idx = idx % other_size;
-            // std::cout << "this_data[" << other_idx << "] - other_data[" << idx << "]\n";
-            result_data[idx] = this_data[idx] + other_data[other_idx];
-        }
+        // Call kernel on raw buffer pointers
+        broadcasted_ewise_kernel(
+            result.data_.get(),
+            data_.get(),
+            other.data_.get(),
+            op,
+            result_size,
+            other_size
+        );
 
         return result;
     }
 
+    Tensor<Rank> ewise_op(Real other, std::function<Real(Real, Real)> op) {
+        auto result = Tensor<Rank>(shape_);
+        auto result_size = std::accumulate(shape_.begin(), shape_.end(), 1, std::multiplies<>());
+        scalar_ewise_kernel(result.data_.get(), data_.get(), other, op, result_size);
+        return result;
+    }
+
+    Tensor<Rank> operator+(const Tensor<Rank>& other) {
+        return ewise_op(other, std::plus<Real>());
+    }
+
+    Tensor<Rank> operator*(const Tensor<Rank>& other) {
+        return ewise_op(other, std::multiplies<Real>());
+    }
+
+    Tensor<Rank> operator/(const Tensor<Rank>& other) {
+        return ewise_op(other, std::divides<Real>());
+    }
+
+    Tensor<Rank> operator+(Real other) {
+        return ewise_op(other, std::plus<Real>());
+    }
+
+    Tensor<Rank> operator*(Real other) {
+        return ewise_op(other, std::multiplies<Real>());
+    }
+
+    Tensor<Rank> operator/(Real other) {
+        return ewise_op(other, std::divides<Real>());
+    }
 
     // Tensor properties
     const std::array<size_t, Rank>& shape() const { return shape_; }
@@ -299,38 +372,12 @@ public:
     }
 };
 
-// Wrapper that automatically infer the rank of the tensor.
-// For example, it avoids having to call:
-// Tensor<3>::create(1, 2, 3), Tensor<2>::create(1, 2) etc..
-template<typename... Args>
-auto create(Args&&... args) {
-    return Tensor<sizeof...(Args)>::create(std::forward<Args>(args)...);
-}
-
-int main(int argc, char** argv) {
-    auto a = create(2, 2, 3, 4);
-    auto b = create(1, 1, 1, 4);
-
-    for (int i = 0; i < 4; i++) {
-        b(0, 0, 0, i) = i + 1;
+namespace tensor {
+    // Wrapper that automatically infer the rank of the tensor.
+    // For example, it avoids having to call:
+    // Tensor<3>::create(1, 2, 3), Tensor<2>::create(1, 2) etc..
+    template<typename... Args>
+    auto create(Args&&... args) {
+        return Tensor<sizeof...(Args)>::create(std::forward<Args>(args)...);
     }
-    std::cout << std::setfill('=') << std::setw(50) << " B " << std::setfill('=') << std::setw(50) << "\n";
-    b.print();
-
-    for (int l = 0; l < 2; l++) {
-        for (int k = 0; k < 2; k++) {
-            for (int i = 0; i < 3; i++) {
-                for (int j = 0; j < 4; j++) {
-                    a(l, k, i, j) = (k + 1) * (i + j);
-                }
-            }
-        }
-    }
-
-    std::cout << std::setfill('=') << std::setw(50) << " A " << std::setfill('=') << std::setw(50) << "\n";
-    a.print();
-
-    std::cout << std::setfill('=') << std::setw(50) << " C " << std::setfill('=') << std::setw(50) << "\n";
-    auto c = a + b;
-    c.print();
 }

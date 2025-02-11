@@ -1,7 +1,7 @@
+#include "tensor.hpp"
 #include <fstream>
 #include <array>
 #include <iostream>
-
 #include <string>
 #include <cstdint>
 
@@ -15,22 +15,7 @@ uint32_t bytes_to_int(const BytesBuffer& buffer) {
            (static_cast<uint32_t>(buffer[3] & 0xFF));
 }
 
-void print_image(
-    const std::vector<char>& images,
-    uint32_t width,
-    uint32_t height,
-    uint32_t image_number
-) {
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            uint8_t pixel = static_cast<uint8_t>(images[(image_number * width * height) + ((y * width) + x)]);
-            std::cout << ((pixel > 0) ? "#" : ".");
-        }
-        std::cout << std::endl;
-    }
-}
-
-void load_data(const std::string& path) {
+Tensor<3> load_data(const std::string& path) {
     std::ifstream file(path);
     BytesBuffer file_buffer;
 
@@ -52,13 +37,36 @@ void load_data(const std::string& path) {
     size_t images_bytes = dataset_size * image_width * image_height;
     char* images = new char[images_bytes];
     file.read(images, images_bytes);
-    auto image_size = image_width * image_height;
+    // We need to convert bytes to actual floating point values
+    Real* buffer = new Real[images_bytes];
+    for (size_t i = 0; i < images_bytes; i++) {
+        buffer[i] = static_cast<Real>(images[i]);
+    }
+    delete[] images;
     // TODO: return Tensor.frombuffer(data)
+    return Tensor<3>::from_buffer(buffer, {dataset_size, image_width, image_height});
 }
 
 // Test program driver
 int main(int argc, char** argv) {
     if (argc < 2) return -1;
     std::cout << "Reading " << argv[1] << std::endl;
-    load_data(argv[1]);
+    auto dataset = load_data(argv[1]);
+    std::cout << dataset << std::endl;
+
+    auto print_image = [](auto &image) {
+        size_t height = image.shape()[0];
+        size_t width = image.shape()[1];
+        for (size_t h = 0; h < height; h++) {
+            for (size_t w = 0; w < width; w++) {
+                std::cout << (image(w, h) > 0 ? "#" : " ");
+            }
+            std::cout << "\n";
+        }
+    };
+
+    for (size_t i = 0; i < 10; i++) {
+        auto image = dataset(i);
+        print_image(image);
+    }
 }
