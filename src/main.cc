@@ -1,5 +1,3 @@
-#include "tensor.hpp"
-#include <format>
 #include <fstream>
 #include <array>
 #include <iostream>
@@ -34,7 +32,6 @@ Tensor<3> load_data(const std::string& path) {
     image_height = bytes_to_int(file_buffer);
 
     // Read images
-    // std::vector<char> images(dataset_size * image_width * image_height);
     size_t images_bytes = dataset_size * image_width * image_height;
     char* images = new char[images_bytes];
     file.read(images, images_bytes);
@@ -44,7 +41,6 @@ Tensor<3> load_data(const std::string& path) {
         buffer[i] = static_cast<u_int8_t>(images[i]);
     }
     delete[] images;
-    // TODO: return Tensor.frombuffer(data)
     return Tensor<3>::from_buffer(buffer, {dataset_size, image_width, image_height});
 }
 
