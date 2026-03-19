@@ -46,7 +46,7 @@ public:
     virtual ~Layer() = default;
     virtual void forward(const Tensor& x, Tensor& result) = 0;
     virtual void backward(const Tensor& loss_grad) = 0;
-    virtual std::array<uint32_t, SHAPE_MAX> output_size();
+    virtual std::array<uint32_t, SHAPE_MAX> output_size() = 0;
     void set_input_shape(const std::array<uint32_t, SHAPE_MAX>& shape) { _input_shape = shape; }
 };
 
@@ -58,8 +58,7 @@ private:
     uint8_t _stride;
 
 public:
-    Conv2DLayer(uint8_t k, uint8_t _stride);
-    ~Conv2DLayer();
+    Conv2DLayer(uint8_t k, uint8_t stride = 1);
     void forward(const Tensor& x, Tensor& result) override;
     void backward(const Tensor& loss_grad) override;
     std::array<uint32_t, SHAPE_MAX> output_size() override;
@@ -69,7 +68,6 @@ public:
 /* ReLU */
 class ReLULayer : public Layer {
 public:
-    ReLULayer();
     void forward(const Tensor& x, Tensor& result) override;
     void backward(const Tensor& loss_grad) override;
     std::array<uint32_t, SHAPE_MAX> output_size() override;

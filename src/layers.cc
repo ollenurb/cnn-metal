@@ -3,7 +3,7 @@
 #include <cstdint>
 
 /* ========== Conv2D implementation ========== */
-Conv2DLayer::Conv2DLayer(uint8_t k, uint8_t stride = 1) : _weights({1, 1, k, k}), _k(k), _stride(stride) { }
+Conv2DLayer::Conv2DLayer(uint8_t k, uint8_t stride) : _weights({1, 1, k, k}), _k(k), _stride(stride) { }
 
 void Conv2DLayer::forward(const Tensor &x, Tensor &result) {
     uint32_t k32 = static_cast<uint32_t>(_k);
