@@ -20,7 +20,8 @@ set(
     SOURCES
     src/metal_cpp_impl.cc
     src/context.cc
-    src/main_metal.cc
+    # src/main_metal.cc
+    src/test.cc
     src/layers.cc
 )
 
@@ -66,7 +67,7 @@ set(METAL_SRC "${CMAKE_SOURCE_DIR}/src/ops.metal")
 # ensure xcrun exists to invoke metal and metallib
 find_program(XCRUN_EXECUTABLE xcrun)
 if(NOT XCRUN_EXECUTABLE)
-    message(FATAL_ERROR "xcrun not found. Xcode command line tools are required to compile Metal shaders.")
+    message(FATAL_ERROR "xcrun not found.")
 endif()
 
 # setup metallib libraries

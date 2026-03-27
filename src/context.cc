@@ -40,7 +40,6 @@ void MetalContext::_load_kernels(MTL::Library *op_library) {
             throw std::runtime_error(ss.str());
         }
     }
-
 }
 
 MetalContext::MetalContext() {
@@ -120,7 +119,6 @@ void MetalContext::blocking_dispatch(const std::vector<KernelDispatch> &dispatch
         compute_encoder->dispatchThreads(grid_size, group_size);
     }
     compute_encoder->endEncoding();
-
     command_buffer->commit();
     command_buffer->waitUntilCompleted();
 }

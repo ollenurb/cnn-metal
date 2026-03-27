@@ -53,7 +53,7 @@ void test_network() {
     // First block
     layers.push_back(std::make_unique<Conv2DLayer>(3, 1));
     layers.push_back(std::make_unique<ReLULayer>());
-    layers.push_back(std::make_unique<MaxPoolLayer>(2));
+    layers.push_back(std::make_unique<MaxPoolLayer>(2, 2));
 
     read_from_file("/Users/matteo/Programming/C++/cnn/res/input.bin", x.data, D * W * H * sizeof(float));
     read_from_file("/Users/matteo/Programming/C++/cnn/res/filter.bin", conv2d.get_weights().data, 3 * 3 * sizeof(float));

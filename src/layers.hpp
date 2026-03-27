@@ -39,29 +39,31 @@ struct Tensor {
 
 /* Layer */
 class Layer {
-protected:
-    std::array<uint32_t, SHAPE_MAX> _input_shape;
-
 public:
     virtual ~Layer() = default;
     virtual void forward(const Tensor& x, Tensor& result) = 0;
-    virtual void backward(const Tensor& loss_grad) = 0;
-    virtual std::array<uint32_t, SHAPE_MAX> output_size() = 0;
-    void set_input_shape(const std::array<uint32_t, SHAPE_MAX>& shape) { _input_shape = shape; }
+    virtual void backward(const Tensor& input, const Tensor& loss_grad, Tensor& input_grad) = 0;
+    virtual void allocate_gradients() {}
+    virtual void free_gradients() {}
+    virtual std::array<uint32_t, SHAPE_MAX> output_size(const std::array<uint32_t, SHAPE_MAX>& shape) = 0;
 };
 
 /* Convolution */
 class Conv2DLayer : public Layer {
 private:
     Tensor _weights;
+    std::optional<Tensor> _weights_grad;
     uint8_t _k;
     uint8_t _stride;
 
 public:
     Conv2DLayer(uint8_t k, uint8_t stride = 1);
     void forward(const Tensor& x, Tensor& result) override;
-    void backward(const Tensor& loss_grad) override;
-    std::array<uint32_t, SHAPE_MAX> output_size() override;
+    void backward(const Tensor& input, const Tensor& loss_grad, Tensor& input_grad) override;
+    void allocate_gradients() override;
+    void free_gradients() override;
+    std::array<uint32_t, SHAPE_MAX> output_size(const std::array<uint32_t, SHAPE_MAX>& shape) override;
+
     Tensor& get_weights();
 };
 
@@ -69,8 +71,8 @@ public:
 class ReLULayer : public Layer {
 public:
     void forward(const Tensor& x, Tensor& result) override;
-    void backward(const Tensor& loss_grad) override;
-    std::array<uint32_t, SHAPE_MAX> output_size() override;
+    void backward(const Tensor& input, const Tensor& loss_grad, Tensor& input_grad) override;
+    std::array<uint32_t, SHAPE_MAX> output_size(const std::array<uint32_t, SHAPE_MAX>& shape) override;
 };
 
 /* MaxPooling */
@@ -82,6 +84,6 @@ private:
 public:
     MaxPoolLayer(uint8_t k, uint8_t stride = 1);
     void forward(const Tensor& x, Tensor& result) override;
-    void backward(const Tensor& loss_grad) override;
-    std::array<uint32_t, SHAPE_MAX> output_size() override;
+    void backward(const Tensor& input, const Tensor& loss_grad, Tensor& input_grad) override;
+    std::array<uint32_t, SHAPE_MAX> output_size(const std::array<uint32_t, SHAPE_MAX>& shape) override;
 };
